@@ -7,12 +7,14 @@ import AnalysisCard from '../components/AnalysisCard';
 import ContentEditor from '../components/ContentEditor';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
-import { checkBackendHealth } from '../services/api';
+import { checkBackendHealth, processHandwritingSamples } from '../services/api';
 
 export default function Dashboard() {
   const [backendConnected, setBackendConnected] = useState(false);
   const [samples, setSamples] = useState([]);
-  const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState(null);
+  const [processedSamples, setProcessedSamples] = useState([]);
   const [notesText, setNotesText] = useState('');
   const [hasGenerated, setHasGenerated] = useState(false);
 
@@ -32,28 +34,54 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Handle adding new sample images with local blob URLs
+  // Handle adding new sample images with dimensions and local blob URLs
   const handleAddSamples = (newFiles) => {
-    const formatted = newFiles.map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      name: file.name,
-      size: file.size,
-      file,
-      previewUrl: URL.createObjectURL(file),
-    }));
+    // Reset previous error when new files are added
+    setProcessingError(null);
+
+    const formatted = newFiles.map((file) => {
+      const previewUrl = URL.createObjectURL(file);
+      const sampleItem = {
+        id: `${file.name}-${Date.now()}-${Math.random()}`,
+        name: file.name,
+        size: file.size,
+        file,
+        previewUrl,
+        dimensions: null,
+      };
+
+      // Read dimensions asynchronously
+      const img = new Image();
+      img.onload = () => {
+        setSamples((current) =>
+          current.map((item) =>
+            item.id === sampleItem.id
+              ? { ...item, dimensions: { width: img.naturalWidth, height: img.naturalHeight } }
+              : item
+          )
+        );
+      };
+      img.src = previewUrl;
+
+      return sampleItem;
+    });
 
     setSamples((prev) => [...prev, ...formatted]);
   };
 
   // Handle removing a single sample and clean up object URL
   const handleRemoveSample = (indexToRemove) => {
-    setSamples((prev) => {
-      const removed = prev[indexToRemove];
-      if (removed?.previewUrl) {
-        URL.revokeObjectURL(removed.previewUrl);
-      }
-      return prev.filter((_, idx) => idx !== indexToRemove);
-    });
+    const removed = samples[indexToRemove];
+    if (removed?.previewUrl) {
+      URL.revokeObjectURL(removed.previewUrl);
+    }
+    const updated = samples.filter((_, idx) => idx !== indexToRemove);
+    setSamples(updated);
+
+    // Remove from processed samples as well if present
+    if (removed) {
+      setProcessedSamples((prev) => prev.filter((p) => p.filename !== removed.name));
+    }
   };
 
   // Handle clearing all uploaded sample images
@@ -62,14 +90,47 @@ export default function Dashboard() {
       if (sample.previewUrl) URL.revokeObjectURL(sample.previewUrl);
     });
     setSamples([]);
-    setHasAnalyzed(false);
+    setProcessedSamples([]);
+    setProcessingError(null);
+  };
+
+  // Trigger Step 2 computer-vision preprocessing pipeline via FastAPI
+  const handleProcessSamples = async () => {
+    if (samples.length === 0) return;
+
+    setIsProcessing(true);
+    setProcessingError(null);
+
+    try {
+      const filesToUpload = samples.map((s) => s.file);
+      const response = await processHandwritingSamples(filesToUpload);
+
+      if (response.success && response.samples) {
+        // Pair processed items with corresponding local original preview URLs
+        const enriched = response.samples.map((item) => {
+          const matched = samples.find((s) => s.name === item.filename);
+          return {
+            ...item,
+            originalPreviewUrl: matched ? matched.previewUrl : '',
+          };
+        });
+        setProcessedSamples(enriched);
+      } else {
+        throw new Error('Preprocessing succeeded but no sample data was returned.');
+      }
+    } catch (err) {
+      setProcessingError(err.message || 'Failed to process handwriting samples.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Calculate current workflow step for the step indicator
+  const hasProcessed = processedSamples.length > 0;
   let currentStep = 1;
-  if (samples.length > 0 && !hasAnalyzed) currentStep = 2;
-  else if (samples.length > 0 && hasAnalyzed && !notesText.trim()) currentStep = 3;
-  else if (samples.length > 0 && hasAnalyzed && notesText.trim() && !hasGenerated) currentStep = 4;
+  if (samples.length > 0 && !hasProcessed) currentStep = 2;
+  else if (samples.length > 0 && hasProcessed && !notesText.trim()) currentStep = 3;
+  else if (samples.length > 0 && hasProcessed && notesText.trim() && !hasGenerated) currentStep = 4;
   else if (hasGenerated) currentStep = 5;
 
   return (
@@ -89,13 +150,18 @@ export default function Dashboard() {
           onAddSamples={handleAddSamples}
           onRemoveSample={handleRemoveSample}
           onClearAll={handleClearAll}
+          isProcessing={isProcessing}
         />
 
-        {/* Section 2: Analysis Card */}
+        {/* Section 2: Analysis & Preprocessing Card */}
         <AnalysisCard
           hasSamples={samples.length > 0}
           sampleCount={samples.length}
-          onAnalyzed={() => setHasAnalyzed(true)}
+          onProcessSamples={handleProcessSamples}
+          isProcessing={isProcessing}
+          processedSamples={processedSamples}
+          processingError={processingError}
+          onClearError={() => setProcessingError(null)}
         />
 
         {/* Section 3: Content Editor */}

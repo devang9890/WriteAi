@@ -14,3 +14,19 @@ class GenerateResponse(BaseModel):
     task_type: str
     tone: str
     suggestions: Optional[List[str]] = []
+
+
+class OriginalSize(BaseModel):
+    width: int
+    height: int
+
+
+class ProcessedSampleItem(BaseModel):
+    filename: str
+    original_size: OriginalSize
+    processed_image: str
+
+
+class ProcessSamplesResponse(BaseModel):
+    success: bool
+    samples: List[ProcessedSampleItem]
