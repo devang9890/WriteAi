@@ -54,3 +54,41 @@ export async function processHandwritingSamples(files) {
     }
   }
 }
+
+/**
+ * Step 3: Uploads a single handwriting page image to segment into text lines.
+ * @param {File} file - Image File object
+ * @returns {Promise<{
+ *   success: boolean,
+ *   filename: string,
+ *   line_count: number,
+ *   original_size?: { width: number, height: number },
+ *   annotated_image?: string,
+ *   lines: Array<{ index: number, bbox: { x: number, y: number, width: number, height: number }, image: string }>,
+ *   message?: string
+ * }>}
+ */
+export async function segmentHandwritingPage(file) {
+  if (!file) {
+    throw new Error('Please select a handwriting sample image to segment.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await apiClient.post('/api/samples/segment', formData);
+    return response.data;
+  } catch (err) {
+    if (err.response) {
+      const detail = err.response.data?.detail || err.response.statusText;
+      throw new Error(detail || `Server returned error (${err.response.status})`);
+    } else if (err.request) {
+      throw new Error(
+        'Backend server is unavailable or not responding. Please verify the FastAPI server is running on http://localhost:8000.'
+      );
+    } else {
+      throw new Error(err.message || 'An unexpected error occurred while segmenting page lines.');
+    }
+  }
+}

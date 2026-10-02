@@ -5,6 +5,7 @@ import StepIndicator from '../components/StepIndicator';
 import HandwritingUploader from '../components/HandwritingUploader';
 import AnalysisCard from '../components/AnalysisCard';
 import ContentEditor from '../components/ContentEditor';
+import SegmentationViewer from '../components/SegmentationViewer';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
 import { checkBackendHealth, processHandwritingSamples } from '../services/api';
@@ -15,8 +16,8 @@ export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState(null);
   const [processedSamples, setProcessedSamples] = useState([]);
+  const [segmentationResult, setSegmentationResult] = useState(null);
   const [notesText, setNotesText] = useState('');
-  const [hasGenerated, setHasGenerated] = useState(false);
 
   // Periodic health check for backend connection status
   useEffect(() => {
@@ -91,6 +92,7 @@ export default function Dashboard() {
     });
     setSamples([]);
     setProcessedSamples([]);
+    setSegmentationResult(null);
     setProcessingError(null);
   };
 
@@ -127,11 +129,12 @@ export default function Dashboard() {
 
   // Calculate current workflow step for the step indicator
   const hasProcessed = processedSamples.length > 0;
+  const hasSegmented = !!segmentationResult && segmentationResult.success;
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
-  else if (samples.length > 0 && hasProcessed && !notesText.trim()) currentStep = 3;
-  else if (samples.length > 0 && hasProcessed && notesText.trim() && !hasGenerated) currentStep = 4;
-  else if (hasGenerated) currentStep = 5;
+  else if (samples.length > 0 && hasProcessed && !hasSegmented) currentStep = 3;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && !notesText.trim()) currentStep = 4;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && notesText.trim()) currentStep = 5;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
@@ -164,20 +167,25 @@ export default function Dashboard() {
           onClearError={() => setProcessingError(null)}
         />
 
-        {/* Section 3: Content Editor */}
+        {/* Section 3: Line Segmentation Viewer */}
+        <SegmentationViewer
+          samples={samples}
+          onSegmentationComplete={setSegmentationResult}
+        />
+
+        {/* Section 4: Content Editor */}
         <ContentEditor
           text={notesText}
           onChangeText={setNotesText}
         />
 
-        {/* Section 4: Generation Action Card */}
+        {/* Section 5: Generation Action Card */}
         <GenerationCard
           hasSamples={samples.length > 0}
           hasContent={notesText.trim().length > 0}
-          onGenerated={() => setHasGenerated(true)}
         />
 
-        {/* Section 5: Output Preview */}
+        {/* Section 6: Output Preview */}
         <OutputPreview generatedPages={[]} />
       </main>
 

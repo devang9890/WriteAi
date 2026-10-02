@@ -17,7 +17,7 @@ export default function ContentEditor({ text, onChangeText }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-            3. Enter Your Notes
+            4. Enter Your Notes
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Enter the text you want WriteAI to turn into handwritten pages.

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 
 class GenerateRequest(BaseModel):
@@ -30,3 +30,28 @@ class ProcessedSampleItem(BaseModel):
 class ProcessSamplesResponse(BaseModel):
     success: bool
     samples: List[ProcessedSampleItem]
+
+
+class BoundingBox(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class SegmentedLineItem(BaseModel):
+    index: int
+    bbox: BoundingBox
+    image: str
+    quality: Optional[Dict[str, Any]] = None
+
+
+class SegmentResponse(BaseModel):
+    success: bool
+    filename: str
+    line_count: int
+    lines: List[SegmentedLineItem] = []
+    original_size: Optional[OriginalSize] = None
+    annotated_image: Optional[str] = None
+    message: Optional[str] = None
+    diagnostics: Optional[Dict[str, Any]] = None
