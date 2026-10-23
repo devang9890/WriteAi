@@ -34,7 +34,7 @@ export function formatApiError(err, fallbackMessage = 'An unexpected error occur
     (typeof err.message === 'string' && err.message.toLowerCase().includes('timeout'));
 
   if (isTimeout) {
-    return 'The OCR recognition request timed out while processing. Deep learning transcription on CPU takes several minutes for pages with many lines (e.g. 30+ lines). Please try again or process fewer lines.';
+    return 'The request timed out while processing. Deep learning or complex image analysis on CPU can take some time. Please try again.';
   }
 
   // 3. HTTP status error responses (4xx, 5xx)
@@ -65,7 +65,7 @@ export function formatApiError(err, fallbackMessage = 'An unexpected error occur
     if (status === 500) {
       return detail
         ? `Backend error (500): ${detail}`
-        : 'Internal server error (500) occurred on the backend during OCR processing.';
+        : 'Internal server error (500) occurred on the backend during processing.';
     }
     return detail ? `Server error (${status}): ${detail}` : `Server returned error (${status}).`;
   }
@@ -225,6 +225,57 @@ export async function recognizeHandwriting(file, options = {}) {
     return normalizedData;
   } catch (err) {
     throw new Error(formatApiError(err, 'An unexpected error occurred while recognizing handwriting.'));
+  }
+}
+
+/**
+ * Step 5: Analyzes handwriting style metrics from an un-thresholded original image.
+ * Extracts stroke thickness, line/character height, line spacing, horizontal spacing,
+ * baseline slant angle, ink density, coverage %, and dominant ink color.
+ *
+ * @param {File} file - Image File object
+ * @param {Object} [options] - Optional settings
+ * @param {number} [options.timeout=60000] - Request timeout in milliseconds (default 60s)
+ * @param {AbortSignal} [options.signal] - Optional cancellation signal
+ * @returns {Promise<{
+ *   success: boolean,
+ *   filename: string,
+ *   original_size?: { width: number, height: number },
+ *   line_count_detected: number,
+ *   metrics: {
+ *     stroke_thickness: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     line_height: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     line_spacing: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     horizontal_spacing: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     slant_angle: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     ink_density: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string },
+ *     ink_coverage_pct: { value: number|null, unit: string, is_heuristic: boolean, status: string, confidence: string, description: string }
+ *   },
+ *   dominant_color: { rgb: number[]|null, hex: string|null, color_name: string|null, is_reliable: boolean, confidence: string },
+ *   summary?: { headline: string, weight_label: string, slant_label: string, spacing_label: string, density_label: string, ink_label: string },
+ *   annotated_sample?: string,
+ *   message?: string,
+ *   analysis_time_sec?: number
+ * }>}
+ */
+export async function analyzeHandwritingStyle(file, options = {}) {
+  if (!file) {
+    throw new Error('Please select a handwriting sample image to analyze style.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const timeoutMs = options.timeout ?? 90000; // 90 seconds timeout
+
+  try {
+    const response = await apiClient.post('/api/samples/style', formData, {
+      timeout: timeoutMs,
+      signal: options.signal,
+    });
+    return response.data;
+  } catch (err) {
+    throw new Error(formatApiError(err, 'An unexpected error occurred while analyzing handwriting style.'));
   }
 }
 

@@ -7,9 +7,15 @@ import AnalysisCard from '../components/AnalysisCard';
 import ContentEditor from '../components/ContentEditor';
 import SegmentationViewer from '../components/SegmentationViewer';
 import OCRResults from '../components/OCRResults';
+import StyleAnalysisCard from '../components/StyleAnalysisCard';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
-import { checkBackendHealth, processHandwritingSamples, recognizeHandwriting } from '../services/api';
+import {
+  checkBackendHealth,
+  processHandwritingSamples,
+  recognizeHandwriting,
+  analyzeHandwritingStyle,
+} from '../services/api';
 
 export default function Dashboard() {
   const [backendConnected, setBackendConnected] = useState(false);
@@ -21,24 +27,27 @@ export default function Dashboard() {
   const [ocrData, setOcrData] = useState(null);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState(null);
+  const [styleData, setStyleData] = useState(null);
+  const [isStyleLoading, setIsStyleLoading] = useState(false);
+  const [styleError, setStyleError] = useState(null);
   const [notesText, setNotesText] = useState('');
 
-  // Keep a ref to isOcrLoading so health check interval doesn't falsely mark disconnected
-  const isOcrLoadingRef = useRef(isOcrLoading);
+  // Keep a ref to busy state so health check interval doesn't falsely mark disconnected
+  const isBusyRef = useRef(false);
   useEffect(() => {
-    isOcrLoadingRef.current = isOcrLoading;
-  }, [isOcrLoading]);
+    isBusyRef.current = isOcrLoading || isStyleLoading;
+  }, [isOcrLoading, isStyleLoading]);
 
   // Periodic health check for backend connection status
-  // Decoupled from OCR workload: during active OCR processing, backend is actively working
+  // Decoupled from heavy CV/OCR workloads: during active processing, backend is actively working
   useEffect(() => {
     let isMounted = true;
     let consecutiveFailures = 0;
 
     async function verifyHealth() {
-      // If OCR inference is actively in-flight, the server is busy handling the user's workload;
+      // If inference or style analysis is actively in-flight, the server is busy handling the workload;
       // do not disconnect due to GIL contention or temporary health check latency.
-      if (isOcrLoadingRef.current) {
+      if (isBusyRef.current) {
         if (isMounted) setBackendConnected(true);
         consecutiveFailures = 0;
         return;
@@ -127,6 +136,8 @@ export default function Dashboard() {
     setSegmentationResult(null);
     setOcrData(null);
     setOcrError(null);
+    setStyleData(null);
+    setStyleError(null);
     setProcessingError(null);
   };
 
@@ -143,7 +154,6 @@ export default function Dashboard() {
       const fileToOcr = samples[0].file;
       const response = await recognizeHandwriting(fileToOcr);
 
-      // Successfully reached backend
       setBackendConnected(true);
 
       if (response && response.success) {
@@ -156,15 +166,46 @@ export default function Dashboard() {
       const errorMsg = err.message || 'An error occurred while recognizing handwriting.';
       setOcrError(errorMsg);
 
-      // Only mark disconnected if it's a true unreachable network failure
       if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
         setBackendConnected(false);
       } else {
-        // If the error was a 4xx, 5xx, or client timeout, the server itself is running
         setBackendConnected(true);
       }
     } finally {
       setIsOcrLoading(false);
+    }
+  };
+
+  // Trigger Step 5 Handwriting Style Analysis
+  const handleAnalyzeStyle = async () => {
+    if (samples.length === 0 || isStyleLoading) return;
+
+    setIsStyleLoading(true);
+    setStyleError(null);
+
+    try {
+      const fileToAnalyze = samples[0].file;
+      const response = await analyzeHandwritingStyle(fileToAnalyze);
+
+      setBackendConnected(true);
+
+      if (response && response.success) {
+        setStyleData(response);
+        setStyleError(null);
+      } else {
+        setStyleError(response?.message || 'Handwriting style could not be analyzed.');
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'An error occurred while analyzing handwriting style.';
+      setStyleError(errorMsg);
+
+      if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
+        setBackendConnected(false);
+      } else {
+        setBackendConnected(true);
+      }
+    } finally {
+      setIsStyleLoading(false);
     }
   };
 
@@ -208,19 +249,28 @@ export default function Dashboard() {
   const hasProcessed = processedSamples.length > 0;
   const hasSegmented = !!segmentationResult && segmentationResult.success;
   const hasOcr = !!ocrData && ocrData.success;
+  const hasStyle = !!styleData && styleData.success;
+
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
   else if (samples.length > 0 && hasProcessed && !hasSegmented) currentStep = 3;
   else if (samples.length > 0 && hasProcessed && hasSegmented && !hasOcr) currentStep = 4;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !notesText.trim()) currentStep = 5;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && notesText.trim()) currentStep = 6;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !hasStyle) currentStep = 5;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && !notesText.trim()) currentStep = 6;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && notesText.trim()) currentStep = 7;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
       <Header
         backendConnected={backendConnected}
-        isBusy={isOcrLoading}
-        busyMessage="Backend Busy — Processing OCR"
+        isBusy={isOcrLoading || isStyleLoading}
+        busyMessage={
+          isOcrLoading
+            ? 'Backend Busy — Processing OCR'
+            : isStyleLoading
+            ? 'Backend Busy — Analyzing Style'
+            : ''
+        }
       />
 
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-8 py-8 flex-1 flex flex-col gap-8">
@@ -268,19 +318,30 @@ export default function Dashboard() {
           onUseText={(text) => setNotesText(text)}
         />
 
-        {/* Section 5: Content Editor */}
+        {/* Section 5: Handwriting Style Analysis */}
+        <StyleAnalysisCard
+          hasSamples={samples.length > 0}
+          sampleCount={samples.length}
+          activeSampleFilename={samples[0]?.name || ''}
+          onAnalyzeStyle={handleAnalyzeStyle}
+          isLoading={isStyleLoading}
+          styleData={styleData}
+          error={styleError}
+        />
+
+        {/* Section 6: Content Editor */}
         <ContentEditor
           text={notesText}
           onChangeText={setNotesText}
         />
 
-        {/* Section 6: Generation Action Card */}
+        {/* Section 7: Generation Action Card */}
         <GenerationCard
           hasSamples={samples.length > 0}
           hasContent={notesText.trim().length > 0}
         />
 
-        {/* Section 7: Output Preview */}
+        {/* Section 8: Output Preview */}
         <OutputPreview generatedPages={[]} />
       </main>
 

@@ -5,8 +5,9 @@ const STEPS = [
   { id: 2, label: 'Preprocess', desc: 'CV Normalization' },
   { id: 3, label: 'Segment', desc: 'Line Detection' },
   { id: 4, label: 'OCR', desc: 'TrOCR Recognition' },
-  { id: 5, label: 'Write', desc: 'Notes / Content' },
-  { id: 6, label: 'Generate', desc: 'Handwriting Engine' },
+  { id: 5, label: 'Style', desc: 'Style Profile' },
+  { id: 6, label: 'Write', desc: 'Notes / Content' },
+  { id: 7, label: 'Generate', desc: 'Handwriting Engine' },
 ];
 
 export default function StepIndicator({ currentStep = 1 }) {

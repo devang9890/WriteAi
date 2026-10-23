@@ -78,3 +78,46 @@ class OCRResponse(BaseModel):
     message: Optional[str] = None
     inference_time_sec: Optional[float] = None
 
+
+# =============================================================================
+# Step 5: Handwriting Style Analysis Schemas
+# =============================================================================
+
+class MetricValue(BaseModel):
+    value: Optional[float] = None
+    unit: str
+    is_heuristic: bool = False
+    status: str = "measured"  # "measured" | "heuristic" | "unavailable"
+    confidence: str = "high"  # "high" | "medium" | "low" | "unavailable"
+    description: str
+
+
+class DominantInkColor(BaseModel):
+    rgb: Optional[List[int]] = None  # [R, G, B]
+    hex: Optional[str] = None        # e.g., "#1c2b4d"
+    color_name: Optional[str] = None # e.g., "Dark Blue / Navy", "Black / Charcoal"
+    is_reliable: bool = True
+    confidence: str = "high"
+
+
+class StyleMetrics(BaseModel):
+    stroke_thickness: MetricValue
+    line_height: MetricValue
+    line_spacing: MetricValue
+    horizontal_spacing: MetricValue
+    slant_angle: MetricValue
+    ink_density: MetricValue
+    ink_coverage_pct: MetricValue
+
+
+class StyleProfileResponse(BaseModel):
+    success: bool
+    filename: str
+    original_size: Optional[OriginalSize] = None
+    line_count_detected: int = 0
+    metrics: Optional[StyleMetrics] = None
+    dominant_color: Optional[DominantInkColor] = None
+    summary: Optional[Dict[str, Any]] = None
+    annotated_sample: Optional[str] = None
+    message: Optional[str] = None
+    analysis_time_sec: Optional[float] = None

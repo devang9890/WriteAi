@@ -14,11 +14,13 @@ from app.models.schemas import (
     OriginalSize,
     OCRResponse,
     OCRLineItem,
+    StyleProfileResponse,
 )
 from app.services.ai_service import ai_service
 from app.services.preprocessing import preprocess_image, validate_image_file, ImageValidationError
 from app.services.segmentation import segment_handwriting_lines
 from app.services.ocr_service import get_ocr_service
+from app.services.style_analysis_service import style_service
 
 router = APIRouter()
 
@@ -287,3 +289,41 @@ async def recognize_sample_handwriting(
         )
 
 
+@router.post("/samples/style", response_model=StyleProfileResponse)
+async def analyze_sample_style(file: UploadFile = File(...)):
+    """
+    Step 5 Handwriting Style Analysis (Non-blocking):
+    Extracts measurable stylistic metrics from the original handwriting image:
+    stroke thickness, line height, line spacing, horizontal spacing, slant angle,
+    ink density, ink coverage, and dominant ink color.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded. Please upload a handwriting page image.")
+
+    filename = file.filename or "handwritten_page"
+
+    try:
+        image_bytes = await file.read()
+        orig_w, orig_h = validate_image_file(filename, image_bytes)
+
+        # Decode image using Pillow with orientation normalization (preserving original color)
+        with Image.open(io.BytesIO(image_bytes)) as pil_img:
+            pil_img = ImageOps.exif_transpose(pil_img)
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+        # Run non-blocking computer vision analysis inside Starlette threadpool
+        profile = await run_in_threadpool(style_service.analyze_style, cv_img, filename)
+        return profile
+
+    except ImageValidationError as ive:
+        raise HTTPException(status_code=ive.status_code, detail=ive.message)
+    except Exception as ex:
+        print(f"[StyleAnalysis] Unexpected error processing '{filename}': {ex}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while analyzing handwriting style in '{filename}': {str(ex)}"
+        )
