@@ -16,6 +16,7 @@ from app.models.schemas import (
     OCRLineItem,
     StyleProfileResponse,
     StyleEncoderResponse,
+    PersonalizedProfileResponse,
 )
 from app.services.ai_service import ai_service
 from app.services.preprocessing import preprocess_image, validate_image_file, ImageValidationError
@@ -23,6 +24,7 @@ from app.services.segmentation import segment_handwriting_lines
 from app.services.ocr_service import get_ocr_service
 from app.services.style_analysis_service import style_service
 from app.services.style_encoder import get_style_encoder_service
+from app.services.profile_service import get_profile_service
 
 router = APIRouter()
 
@@ -394,3 +396,103 @@ async def extract_style_embedding(files: List[UploadFile] = File(...)):
             status_code=500,
             detail=f"An error occurred while extracting style embeddings: {str(ex)}"
         )
+
+
+@router.post("/samples/profile", response_model=PersonalizedProfileResponse)
+@router.post("/profile", response_model=PersonalizedProfileResponse)
+async def create_or_update_profile(
+    files: List[UploadFile] = File(...),
+    profile_id: str = "default_writer",
+):
+    """
+    Step 7 Personalized Handwriting Style Profile:
+    Builds or updates a persistent handwriting style profile by aggregating
+    classical morphological metrics and 512-D CNN ResNet-18 embeddings across
+    one or multiple uploaded handwriting samples.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    if not files or len(files) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No files uploaded. Please upload at least one handwriting sample image."
+        )
+
+    prepared_samples = []
+    for file in files:
+        filename = file.filename or "handwritten_sample"
+        try:
+            image_bytes = await file.read()
+            validate_image_file(filename, image_bytes)
+
+            with Image.open(io.BytesIO(image_bytes)) as pil_img:
+                pil_img = ImageOps.exif_transpose(pil_img)
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
+                cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+            prepared_samples.append((filename, cv_img))
+        except ImageValidationError as ive:
+            if len(files) == 1:
+                raise HTTPException(status_code=ive.status_code, detail=ive.message)
+            continue
+        except Exception as ex:
+            if len(files) == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not decode image '{filename}': {str(ex)}"
+                )
+
+    if not prepared_samples:
+        raise HTTPException(
+            status_code=400,
+            detail="None of the uploaded files could be decoded as valid handwriting images."
+        )
+
+    profile_svc = get_profile_service()
+    try:
+        profile = await run_in_threadpool(
+            profile_svc.build_personalized_profile,
+            samples=prepared_samples,
+            profile_id=profile_id,
+        )
+        return profile
+    except Exception as ex:
+        print(f"[ProfileService] Unexpected error building profile: {ex}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while building the handwriting style profile: {str(ex)}"
+        )
+
+
+@router.get("/samples/profile", response_model=PersonalizedProfileResponse)
+@router.get("/profile", response_model=PersonalizedProfileResponse)
+async def get_profile(profile_id: str = "default_writer"):
+    """
+    Step 7: Retrieve a persisted personalized handwriting style profile.
+    """
+    profile_svc = get_profile_service()
+    profile = profile_svc.get_saved_profile(profile_id=profile_id)
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No personalized handwriting style profile found for '{profile_id}'."
+        )
+    return profile
+
+
+@router.delete("/samples/profile")
+@router.delete("/profile")
+async def delete_profile(profile_id: str = "default_writer"):
+    """
+    Step 7: Delete / reset a persisted personalized handwriting style profile.
+    """
+    profile_svc = get_profile_service()
+    deleted = profile_svc.delete_saved_profile(profile_id=profile_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No profile found with id '{profile_id}' to delete."
+        )
+    return {"success": True, "message": f"Profile '{profile_id}' was deleted successfully."}
+

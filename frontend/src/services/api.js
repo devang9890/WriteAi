@@ -341,3 +341,80 @@ export async function getOCRStatus() {
     return { is_loaded: false, device: 'UNKNOWN' };
   }
 }
+
+/**
+ * Step 7: Creates or updates a personalized handwriting style profile
+ * by aggregating classical morphological metrics and 512-D CNN ResNet-18 visual embeddings
+ * across one or multiple uploaded handwriting samples.
+ *
+ * @param {File[]} files - Array of image File objects
+ * @param {Object} [options]
+ * @param {string} [options.profileId='default_writer'] - Profile ID
+ * @param {number} [options.timeout=90000] - Request timeout in ms
+ * @param {AbortSignal} [options.signal] - Optional abort signal
+ * @returns {Promise<Object>} PersonalizedProfileResponse
+ */
+export async function createStyleProfile(files, options = {}) {
+  if (!files || files.length === 0) {
+    throw new Error('Please select at least one handwriting sample image to build your style profile.');
+  }
+
+  const profileId = options.profileId || 'default_writer';
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append('files', file);
+  });
+
+  const timeoutMs = options.timeout ?? 90000;
+
+  try {
+    const response = await apiClient.post(`/api/profile?profile_id=${encodeURIComponent(profileId)}`, formData, {
+      timeout: timeoutMs,
+      signal: options.signal,
+    });
+    return response.data;
+  } catch (err) {
+    throw new Error(formatApiError(err, 'An unexpected error occurred while building the style profile.'));
+  }
+}
+
+/**
+ * Step 7: Retrieves a persisted handwriting style profile from disk.
+ * Returns null if no profile has been saved yet (HTTP 404).
+ *
+ * @param {string} [profileId='default_writer']
+ * @returns {Promise<Object|null>}
+ */
+export async function getSavedStyleProfile(profileId = 'default_writer') {
+  try {
+    const response = await apiClient.get(`/api/profile?profile_id=${encodeURIComponent(profileId)}`, {
+      timeout: 10000,
+    });
+    return response.data;
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return null;
+    }
+    throw new Error(formatApiError(err, 'Could not retrieve saved style profile.'));
+  }
+}
+
+/**
+ * Step 7: Deletes / resets a saved handwriting style profile.
+ *
+ * @param {string} [profileId='default_writer']
+ * @returns {Promise<boolean>}
+ */
+export async function deleteStyleProfile(profileId = 'default_writer') {
+  try {
+    const response = await apiClient.delete(`/api/profile?profile_id=${encodeURIComponent(profileId)}`, {
+      timeout: 10000,
+    });
+    return response.status === 200;
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return true; // Already gone
+    }
+    throw new Error(formatApiError(err, 'Could not delete style profile.'));
+  }
+}

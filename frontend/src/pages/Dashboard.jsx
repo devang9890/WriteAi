@@ -9,6 +9,7 @@ import SegmentationViewer from '../components/SegmentationViewer';
 import OCRResults from '../components/OCRResults';
 import StyleAnalysisCard from '../components/StyleAnalysisCard';
 import StyleEncoderCard from '../components/StyleEncoderCard';
+import StyleProfileCard from '../components/StyleProfileCard';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
 import {
@@ -17,6 +18,9 @@ import {
   recognizeHandwriting,
   analyzeHandwritingStyle,
   extractStyleEmbedding,
+  createStyleProfile,
+  getSavedStyleProfile,
+  deleteStyleProfile,
 } from '../services/api';
 
 export default function Dashboard() {
@@ -35,13 +39,16 @@ export default function Dashboard() {
   const [encoderData, setEncoderData] = useState(null);
   const [isEncoderLoading, setIsEncoderLoading] = useState(false);
   const [encoderError, setEncoderError] = useState(null);
+  const [profileData, setProfileData] = useState(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState(null);
   const [notesText, setNotesText] = useState('');
 
   // Keep a ref to busy state so health check interval doesn't falsely mark disconnected
   const isBusyRef = useRef(false);
   useEffect(() => {
-    isBusyRef.current = isOcrLoading || isStyleLoading || isEncoderLoading;
-  }, [isOcrLoading, isStyleLoading, isEncoderLoading]);
+    isBusyRef.current = isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading;
+  }, [isOcrLoading, isStyleLoading, isEncoderLoading, isProfileLoading]);
 
   // Periodic health check for backend connection status
   // Decoupled from heavy CV/OCR/CNN workloads: during active processing, backend is actively working
@@ -78,6 +85,25 @@ export default function Dashboard() {
     return () => {
       isMounted = false;
       clearInterval(interval);
+    };
+  }, []);
+
+  // On initial mount, retrieve any previously persisted personalized style profile from disk
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchSavedProfile() {
+      try {
+        const saved = await getSavedStyleProfile('default_writer');
+        if (isMounted && saved) {
+          setProfileData(saved);
+        }
+      } catch (err) {
+        // Silently tolerate if backend is not yet ready or profile doesn't exist
+      }
+    }
+    fetchSavedProfile();
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -248,6 +274,74 @@ export default function Dashboard() {
     }
   };
 
+  // Trigger Step 7: Personalized Handwriting Style Profile creation/update
+  const handleBuildProfile = async () => {
+    if (samples.length === 0 || isProfileLoading) return;
+
+    setIsProfileLoading(true);
+    setProfileError(null);
+
+    try {
+      const filesToUpload = samples.map((s) => s.file);
+      const response = await createStyleProfile(filesToUpload, { profileId: 'default_writer' });
+
+      setBackendConnected(true);
+
+      if (response && response.success) {
+        setProfileData(response);
+        setProfileError(null);
+      } else {
+        setProfileError(response?.message || 'Could not build personalized style profile.');
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'An error occurred while building the style profile.';
+      setProfileError(errorMsg);
+
+      if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
+        setBackendConnected(false);
+      } else {
+        setBackendConnected(true);
+      }
+    } finally {
+      setIsProfileLoading(false);
+    }
+  };
+
+  // Step 7: Refresh persisted style profile from disk
+  const handleRefreshProfile = async () => {
+    setIsProfileLoading(true);
+    setProfileError(null);
+    try {
+      const saved = await getSavedStyleProfile('default_writer');
+      setBackendConnected(true);
+      setProfileData(saved);
+      if (!saved) {
+        setProfileError('No saved style profile found on the server. Click "Generate Style Profile" to build one.');
+      }
+    } catch (err) {
+      setProfileError(err.message || 'Could not refresh saved profile.');
+    } finally {
+      setIsProfileLoading(false);
+    }
+  };
+
+  // Step 7: Delete / reset saved profile
+  const handleDeleteProfile = async () => {
+    if (!window.confirm('Are you sure you want to delete and reset your saved handwriting profile?')) {
+      return;
+    }
+    setIsProfileLoading(true);
+    try {
+      await deleteStyleProfile('default_writer');
+      setProfileData(null);
+      setProfileError(null);
+    } catch (err) {
+      setProfileError(err.message || 'Failed to delete style profile.');
+    } finally {
+      setIsProfileLoading(false);
+    }
+  };
+
   // Trigger Step 2 computer-vision preprocessing pipeline via FastAPI
   const handleProcessSamples = async () => {
     if (samples.length === 0 || isProcessing) return;
@@ -289,6 +383,7 @@ export default function Dashboard() {
   const hasOcr = !!ocrData && ocrData.success;
   const hasStyle = !!styleData && styleData.success;
   const hasEncoder = !!encoderData && encoderData.success;
+  const hasProfile = !!profileData && profileData.status === 'ready';
 
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
@@ -296,14 +391,14 @@ export default function Dashboard() {
   else if (samples.length > 0 && hasProcessed && hasSegmented && !hasOcr) currentStep = 4;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !hasStyle) currentStep = 5;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && !hasEncoder) currentStep = 6;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && !notesText.trim()) currentStep = 7;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && notesText.trim()) currentStep = 8;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && !hasProfile) currentStep = 7;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && hasProfile) currentStep = 8;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
       <Header
         backendConnected={backendConnected}
-        isBusy={isOcrLoading || isStyleLoading || isEncoderLoading}
+        isBusy={isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading}
         busyMessage={
           isOcrLoading
             ? 'Backend Busy — Processing OCR'
@@ -311,6 +406,8 @@ export default function Dashboard() {
             ? 'Backend Busy — Analyzing Style'
             : isEncoderLoading
             ? 'Backend Busy — CNN Feature Extraction'
+            : isProfileLoading
+            ? 'Backend Busy — Building Style Profile'
             : ''
         }
       />
@@ -381,7 +478,19 @@ export default function Dashboard() {
           error={encoderError}
         />
 
-        {/* Section 7: Content Editor */}
+        {/* Section 7: Personalized Handwriting Style Profile */}
+        <StyleProfileCard
+          profileData={profileData}
+          isLoading={isProfileLoading}
+          error={profileError}
+          hasUploadedSamples={samples.length > 0}
+          uploadedCount={samples.length}
+          onBuildProfile={handleBuildProfile}
+          onRefreshProfile={handleRefreshProfile}
+          onDeleteProfile={handleDeleteProfile}
+        />
+
+        {/* Section 8: Content Editor */}
         <ContentEditor
           text={notesText}
           onChangeText={setNotesText}

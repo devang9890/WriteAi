@@ -5,10 +5,10 @@ const STEPS = [
   { id: 2, label: 'Preprocess', desc: 'CV Normalization' },
   { id: 3, label: 'Segment', desc: 'Line Detection' },
   { id: 4, label: 'OCR', desc: 'TrOCR Recognition' },
-  { id: 5, label: 'Profile', desc: 'Style Metrics' },
+  { id: 5, label: 'Style', desc: 'Morphology Metrics' },
   { id: 6, label: 'Encoder', desc: 'CNN 512-D' },
-  { id: 7, label: 'Write', desc: 'Notes / Content' },
-  { id: 8, label: 'Generate', desc: 'Handwriting Engine' },
+  { id: 7, label: 'Profile', desc: 'Personalized Profile' },
+  { id: 8, label: 'Generate', desc: 'Synthesis Engine' },
 ];
 
 export default function StepIndicator({ currentStep = 1 }) {

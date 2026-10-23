@@ -166,3 +166,62 @@ class StyleEncoderResponse(BaseModel):
         "been fine-tuned for writer-identification or personal handwriting generation."
     )
     message: Optional[str] = None
+
+
+# =============================================================================
+# Step 7: Personalized Handwriting Style Profile Schemas
+# =============================================================================
+
+class AggregatedMetrics(BaseModel):
+    stroke_thickness: MetricValue
+    line_height: MetricValue
+    line_spacing: MetricValue
+    horizontal_spacing: MetricValue
+    slant_angle: MetricValue
+    ink_density: MetricValue
+    ink_coverage_pct: MetricValue
+
+
+class SampleComparisonItem(BaseModel):
+    filename: str
+    success: bool
+    stroke_thickness_px: Optional[float] = None
+    line_height_px: Optional[float] = None
+    line_spacing_px: Optional[float] = None
+    slant_angle_deg: Optional[float] = None
+    ink_density_ratio: Optional[float] = None
+    coverage_pct: Optional[float] = None
+    horizontal_spacing_px: Optional[float] = None
+    dominant_color_hex: Optional[str] = None
+    dominant_color_name: Optional[str] = None
+    similarity_to_profile: Optional[float] = None  # Cosine similarity to aggregated 512-D embedding (0.0 - 1.0)
+    cosine_similarity: Optional[float] = None
+    message: Optional[str] = None
+
+
+class PersonalizedProfileResponse(BaseModel):
+    success: bool
+    profile_id: str = "default_profile"
+    profile_name: str = "Personal Handwriting Profile"
+    status: str = "ready"  # "ready" | "empty" | "processing" | "error"
+    created_at: str
+    updated_at: str
+    total_samples_analyzed: int = 0
+    valid_sample_count: int = 0
+    valid_samples_count: Optional[int] = 0
+    embedding_dim: int = 512
+    embedding: List[float] = []
+    preview_values: List[float] = []
+    aggregated_metrics: Optional[AggregatedMetrics] = None
+    dominant_color: Optional[DominantInkColor] = None
+    summary: Optional[Dict[str, Any]] = None
+    sample_comparisons: List[SampleComparisonItem] = []
+    aggregation_method: str = "Median Metric Aggregation + L2-Normalized Mean Embedding"
+    processing_time_sec: Optional[float] = None
+    ml_limitations_notice: str = (
+        "This profile mathematically combines measured image statistics (OpenCV/NumPy) and "
+        "generic visual features from a pretrained ResNet-18 backbone. It represents an empirical "
+        "handwriting style descriptor, but does not constitute a fine-tuned biometric writer identity "
+        "or a handwriting generation model."
+    )
+    message: Optional[str] = None
