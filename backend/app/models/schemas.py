@@ -121,3 +121,48 @@ class StyleProfileResponse(BaseModel):
     annotated_sample: Optional[str] = None
     message: Optional[str] = None
     analysis_time_sec: Optional[float] = None
+
+
+# =============================================================================
+# Step 6: CNN-Based Handwriting Style Encoder Schemas
+# =============================================================================
+
+class SampleEncoderItem(BaseModel):
+    filename: str
+    success: bool
+    embedding_dim: int = 512
+    l2_norm: Optional[float] = None
+    preview_values: Optional[List[float]] = []
+    message: Optional[str] = None
+
+
+class EmbeddingStatistics(BaseModel):
+    min: float
+    max: float
+    mean: float
+    std: float
+    l2_norm: float
+    active_features_count: int
+
+
+class StyleEncoderResponse(BaseModel):
+    success: bool
+    model_name: str
+    model_source: str
+    is_pretrained: bool
+    embedding_dim: int = 512
+    embedding: List[float] = []
+    preview_values: List[float] = []
+    statistics: Optional[EmbeddingStatistics] = None
+    total_samples_received: int = 0
+    successful_samples: int = 0
+    sample_details: List[SampleEncoderItem] = []
+    aggregation_method: str = "L2-Normalized Mean Feature Pooling"
+    processing_time_sec: Optional[float] = None
+    warnings: List[str] = []
+    ml_limitations_notice: str = (
+        "Baseline representation uses generic visual features extracted by a pretrained "
+        "ResNet-18 backbone (ImageNet). This is frozen visual feature extraction and has not "
+        "been fine-tuned for writer-identification or personal handwriting generation."
+    )
+    message: Optional[str] = None

@@ -15,12 +15,14 @@ from app.models.schemas import (
     OCRResponse,
     OCRLineItem,
     StyleProfileResponse,
+    StyleEncoderResponse,
 )
 from app.services.ai_service import ai_service
 from app.services.preprocessing import preprocess_image, validate_image_file, ImageValidationError
 from app.services.segmentation import segment_handwriting_lines
 from app.services.ocr_service import get_ocr_service
 from app.services.style_analysis_service import style_service
+from app.services.style_encoder import get_style_encoder_service
 
 router = APIRouter()
 
@@ -326,4 +328,69 @@ async def analyze_sample_style(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while analyzing handwriting style in '{filename}': {str(ex)}"
+        )
+
+
+@router.post("/samples/style-encoder", response_model=StyleEncoderResponse)
+@router.post("/style-encoder/extract", response_model=StyleEncoderResponse)
+async def extract_style_embedding(files: List[UploadFile] = File(...)):
+    """
+    Step 6 CNN-Based Handwriting Style Encoder (Non-blocking):
+    Extracts 512-dimensional visual feature representations from one or multiple
+    handwriting samples using a pretrained ResNet-18 convolutional backbone.
+    Applies Global Average Pooling and L2-Normalized Mean Feature Pooling across samples.
+    """
+    from fastapi.concurrency import run_in_threadpool
+    from app.services.style_encoder import get_style_encoder_service
+
+    if not files or len(files) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No files uploaded. Please upload at least one handwriting sample image."
+        )
+
+    prepared_samples = []
+    encoder_service = get_style_encoder_service()
+
+    for file in files:
+        filename = file.filename or "handwritten_sample"
+        try:
+            image_bytes = await file.read()
+            validate_image_file(filename, image_bytes)
+
+            with Image.open(io.BytesIO(image_bytes)) as pil_img:
+                pil_img = ImageOps.exif_transpose(pil_img)
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
+                cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+            prepared_samples.append((filename, cv_img))
+        except ImageValidationError as ive:
+            if len(files) == 1:
+                raise HTTPException(status_code=ive.status_code, detail=ive.message)
+            continue
+        except Exception as ex:
+            if len(files) == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not decode image '{filename}': {str(ex)}"
+                )
+
+    if not prepared_samples:
+        raise HTTPException(
+            status_code=400,
+            detail="None of the uploaded files could be decoded as valid handwriting images."
+        )
+
+    try:
+        # Run CNN inference asynchronously in Starlette threadpool
+        response = await run_in_threadpool(
+            encoder_service.extract_style_profile, prepared_samples
+        )
+        return response
+    except Exception as ex:
+        print(f"[StyleEncoder] Unexpected error during feature extraction: {ex}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while extracting style embeddings: {str(ex)}"
         )

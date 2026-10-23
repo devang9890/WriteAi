@@ -5,9 +5,10 @@ const STEPS = [
   { id: 2, label: 'Preprocess', desc: 'CV Normalization' },
   { id: 3, label: 'Segment', desc: 'Line Detection' },
   { id: 4, label: 'OCR', desc: 'TrOCR Recognition' },
-  { id: 5, label: 'Style', desc: 'Style Profile' },
-  { id: 6, label: 'Write', desc: 'Notes / Content' },
-  { id: 7, label: 'Generate', desc: 'Handwriting Engine' },
+  { id: 5, label: 'Profile', desc: 'Style Metrics' },
+  { id: 6, label: 'Encoder', desc: 'CNN 512-D' },
+  { id: 7, label: 'Write', desc: 'Notes / Content' },
+  { id: 8, label: 'Generate', desc: 'Handwriting Engine' },
 ];
 
 export default function StepIndicator({ currentStep = 1 }) {
@@ -47,7 +48,7 @@ export default function StepIndicator({ currentStep = 1 }) {
               </div>
 
               {idx < STEPS.length - 1 && (
-                <div className="flex-1 min-w-[20px] max-w-[60px] h-[2px] bg-slate-200 hidden sm:block">
+                <div className="flex-1 min-w-[15px] max-w-[45px] h-[2px] bg-slate-200 hidden sm:block">
                   <div
                     className={`h-full transition-all duration-300 ${
                       step.id < currentStep ? 'bg-violet-600' : 'bg-transparent'

@@ -8,6 +8,7 @@ import ContentEditor from '../components/ContentEditor';
 import SegmentationViewer from '../components/SegmentationViewer';
 import OCRResults from '../components/OCRResults';
 import StyleAnalysisCard from '../components/StyleAnalysisCard';
+import StyleEncoderCard from '../components/StyleEncoderCard';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
 import {
@@ -15,6 +16,7 @@ import {
   processHandwritingSamples,
   recognizeHandwriting,
   analyzeHandwritingStyle,
+  extractStyleEmbedding,
 } from '../services/api';
 
 export default function Dashboard() {
@@ -30,22 +32,25 @@ export default function Dashboard() {
   const [styleData, setStyleData] = useState(null);
   const [isStyleLoading, setIsStyleLoading] = useState(false);
   const [styleError, setStyleError] = useState(null);
+  const [encoderData, setEncoderData] = useState(null);
+  const [isEncoderLoading, setIsEncoderLoading] = useState(false);
+  const [encoderError, setEncoderError] = useState(null);
   const [notesText, setNotesText] = useState('');
 
   // Keep a ref to busy state so health check interval doesn't falsely mark disconnected
   const isBusyRef = useRef(false);
   useEffect(() => {
-    isBusyRef.current = isOcrLoading || isStyleLoading;
-  }, [isOcrLoading, isStyleLoading]);
+    isBusyRef.current = isOcrLoading || isStyleLoading || isEncoderLoading;
+  }, [isOcrLoading, isStyleLoading, isEncoderLoading]);
 
   // Periodic health check for backend connection status
-  // Decoupled from heavy CV/OCR workloads: during active processing, backend is actively working
+  // Decoupled from heavy CV/OCR/CNN workloads: during active processing, backend is actively working
   useEffect(() => {
     let isMounted = true;
     let consecutiveFailures = 0;
 
     async function verifyHealth() {
-      // If inference or style analysis is actively in-flight, the server is busy handling the workload;
+      // If inference, style analysis, or CNN extraction is in-flight, the server is busy handling the workload;
       // do not disconnect due to GIL contention or temporary health check latency.
       if (isBusyRef.current) {
         if (isMounted) setBackendConnected(true);
@@ -138,19 +143,19 @@ export default function Dashboard() {
     setOcrError(null);
     setStyleData(null);
     setStyleError(null);
+    setEncoderData(null);
+    setEncoderError(null);
     setProcessingError(null);
   };
 
   // Trigger Step 4 OCR recognition via TrOCR
   const handleRecognizeHandwriting = async () => {
-    // Guard against duplicate execution or running with no uploaded sample
     if (samples.length === 0 || isOcrLoading) return;
 
     setIsOcrLoading(true);
     setOcrError(null);
 
     try {
-      // Use the first uploaded sample image
       const fileToOcr = samples[0].file;
       const response = await recognizeHandwriting(fileToOcr);
 
@@ -209,6 +214,40 @@ export default function Dashboard() {
     }
   };
 
+  // Trigger Step 6 CNN-Based Handwriting Style Encoder
+  const handleExtractStyleEmbedding = async () => {
+    if (samples.length === 0 || isEncoderLoading) return;
+
+    setIsEncoderLoading(true);
+    setEncoderError(null);
+
+    try {
+      // Pass all uploaded sample images for multi-page feature pooling
+      const filesToAnalyze = samples.map((s) => s.file);
+      const response = await extractStyleEmbedding(filesToAnalyze);
+
+      setBackendConnected(true);
+
+      if (response && response.success) {
+        setEncoderData(response);
+        setEncoderError(null);
+      } else {
+        setEncoderError(response?.message || 'CNN style embedding could not be extracted.');
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'An error occurred while extracting style embeddings.';
+      setEncoderError(errorMsg);
+
+      if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
+        setBackendConnected(false);
+      } else {
+        setBackendConnected(true);
+      }
+    } finally {
+      setIsEncoderLoading(false);
+    }
+  };
+
   // Trigger Step 2 computer-vision preprocessing pipeline via FastAPI
   const handleProcessSamples = async () => {
     if (samples.length === 0 || isProcessing) return;
@@ -223,7 +262,6 @@ export default function Dashboard() {
       setBackendConnected(true);
 
       if (response.success && response.samples) {
-        // Pair processed items with corresponding local original preview URLs
         const enriched = response.samples.map((item) => {
           const matched = samples.find((s) => s.name === item.filename);
           return {
@@ -250,25 +288,29 @@ export default function Dashboard() {
   const hasSegmented = !!segmentationResult && segmentationResult.success;
   const hasOcr = !!ocrData && ocrData.success;
   const hasStyle = !!styleData && styleData.success;
+  const hasEncoder = !!encoderData && encoderData.success;
 
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
   else if (samples.length > 0 && hasProcessed && !hasSegmented) currentStep = 3;
   else if (samples.length > 0 && hasProcessed && hasSegmented && !hasOcr) currentStep = 4;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !hasStyle) currentStep = 5;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && !notesText.trim()) currentStep = 6;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && notesText.trim()) currentStep = 7;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && !hasEncoder) currentStep = 6;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && !notesText.trim()) currentStep = 7;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && notesText.trim()) currentStep = 8;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
       <Header
         backendConnected={backendConnected}
-        isBusy={isOcrLoading || isStyleLoading}
+        isBusy={isOcrLoading || isStyleLoading || isEncoderLoading}
         busyMessage={
           isOcrLoading
             ? 'Backend Busy — Processing OCR'
             : isStyleLoading
             ? 'Backend Busy — Analyzing Style'
+            : isEncoderLoading
+            ? 'Backend Busy — CNN Feature Extraction'
             : ''
         }
       />
@@ -329,19 +371,29 @@ export default function Dashboard() {
           error={styleError}
         />
 
-        {/* Section 6: Content Editor */}
+        {/* Section 6: CNN-Based Handwriting Style Encoder */}
+        <StyleEncoderCard
+          hasSamples={samples.length > 0}
+          sampleCount={samples.length}
+          onExtractEmbedding={handleExtractStyleEmbedding}
+          isLoading={isEncoderLoading}
+          encoderData={encoderData}
+          error={encoderError}
+        />
+
+        {/* Section 7: Content Editor */}
         <ContentEditor
           text={notesText}
           onChangeText={setNotesText}
         />
 
-        {/* Section 7: Generation Action Card */}
+        {/* Section 8: Generation Action Card */}
         <GenerationCard
           hasSamples={samples.length > 0}
           hasContent={notesText.trim().length > 0}
         />
 
-        {/* Section 8: Output Preview */}
+        {/* Section 9: Output Preview */}
         <OutputPreview generatedPages={[]} />
       </main>
 

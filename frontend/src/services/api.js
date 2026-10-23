@@ -235,7 +235,7 @@ export async function recognizeHandwriting(file, options = {}) {
  *
  * @param {File} file - Image File object
  * @param {Object} [options] - Optional settings
- * @param {number} [options.timeout=60000] - Request timeout in milliseconds (default 60s)
+ * @param {number} [options.timeout=90000] - Request timeout in milliseconds (default 90s)
  * @param {AbortSignal} [options.signal] - Optional cancellation signal
  * @returns {Promise<{
  *   success: boolean,
@@ -276,6 +276,56 @@ export async function analyzeHandwritingStyle(file, options = {}) {
     return response.data;
   } catch (err) {
     throw new Error(formatApiError(err, 'An unexpected error occurred while analyzing handwriting style.'));
+  }
+}
+
+/**
+ * Step 6: Extracts 512-dimensional CNN style embeddings across one or multiple handwriting images.
+ * Uses a pretrained ResNet-18 convolutional backbone with Global Average Pooling.
+ *
+ * @param {File[]} files - Array of image File objects
+ * @param {Object} [options] - Optional settings
+ * @param {number} [options.timeout=60000] - Request timeout in milliseconds (default 60s)
+ * @param {AbortSignal} [options.signal] - Optional cancellation signal
+ * @returns {Promise<{
+ *   success: boolean,
+ *   model_name: string,
+ *   model_source: string,
+ *   is_pretrained: boolean,
+ *   embedding_dim: number,
+ *   embedding: number[],
+ *   preview_values: number[],
+ *   statistics?: { min: number, max: number, mean: number, std: number, l2_norm: number, active_features_count: number },
+ *   total_samples_received: number,
+ *   successful_samples: number,
+ *   sample_details: Array<{ filename: string, success: boolean, embedding_dim: number, l2_norm?: number, preview_values?: number[], message?: string }>,
+ *   aggregation_method: string,
+ *   processing_time_sec?: number,
+ *   warnings: string[],
+ *   ml_limitations_notice: string,
+ *   message?: string
+ * }>}
+ */
+export async function extractStyleEmbedding(files, options = {}) {
+  if (!files || files.length === 0) {
+    throw new Error('Please select at least one handwriting sample image to extract CNN embeddings.');
+  }
+
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append('files', file);
+  });
+
+  const timeoutMs = options.timeout ?? 60000;
+
+  try {
+    const response = await apiClient.post('/api/samples/style-encoder', formData, {
+      timeout: timeoutMs,
+      signal: options.signal,
+    });
+    return response.data;
+  } catch (err) {
+    throw new Error(formatApiError(err, 'An unexpected error occurred while extracting style embeddings.'));
   }
 }
 
