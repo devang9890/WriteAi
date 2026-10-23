@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Header from '../components/Header';
 import Hero from '../components/Hero';
 import StepIndicator from '../components/StepIndicator';
@@ -6,9 +6,10 @@ import HandwritingUploader from '../components/HandwritingUploader';
 import AnalysisCard from '../components/AnalysisCard';
 import ContentEditor from '../components/ContentEditor';
 import SegmentationViewer from '../components/SegmentationViewer';
+import OCRResults from '../components/OCRResults';
 import GenerationCard from '../components/GenerationCard';
 import OutputPreview from '../components/OutputPreview';
-import { checkBackendHealth, processHandwritingSamples } from '../services/api';
+import { checkBackendHealth, processHandwritingSamples, recognizeHandwriting } from '../services/api';
 
 export default function Dashboard() {
   const [backendConnected, setBackendConnected] = useState(false);
@@ -17,18 +18,49 @@ export default function Dashboard() {
   const [processingError, setProcessingError] = useState(null);
   const [processedSamples, setProcessedSamples] = useState([]);
   const [segmentationResult, setSegmentationResult] = useState(null);
+  const [ocrData, setOcrData] = useState(null);
+  const [isOcrLoading, setIsOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState(null);
   const [notesText, setNotesText] = useState('');
 
+  // Keep a ref to isOcrLoading so health check interval doesn't falsely mark disconnected
+  const isOcrLoadingRef = useRef(isOcrLoading);
+  useEffect(() => {
+    isOcrLoadingRef.current = isOcrLoading;
+  }, [isOcrLoading]);
+
   // Periodic health check for backend connection status
+  // Decoupled from OCR workload: during active OCR processing, backend is actively working
   useEffect(() => {
     let isMounted = true;
+    let consecutiveFailures = 0;
+
     async function verifyHealth() {
+      // If OCR inference is actively in-flight, the server is busy handling the user's workload;
+      // do not disconnect due to GIL contention or temporary health check latency.
+      if (isOcrLoadingRef.current) {
+        if (isMounted) setBackendConnected(true);
+        consecutiveFailures = 0;
+        return;
+      }
+
       const isOnline = await checkBackendHealth();
-      if (isMounted) setBackendConnected(isOnline);
+      if (!isMounted) return;
+
+      if (isOnline) {
+        consecutiveFailures = 0;
+        setBackendConnected(true);
+      } else {
+        consecutiveFailures += 1;
+        // Require at least 2 consecutive failed health checks to avoid UI flapping during brief spikes
+        if (consecutiveFailures >= 2) {
+          setBackendConnected(false);
+        }
+      }
     }
 
     verifyHealth();
-    const interval = setInterval(verifyHealth, 5000);
+    const interval = setInterval(verifyHealth, 6000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -93,12 +125,52 @@ export default function Dashboard() {
     setSamples([]);
     setProcessedSamples([]);
     setSegmentationResult(null);
+    setOcrData(null);
+    setOcrError(null);
     setProcessingError(null);
+  };
+
+  // Trigger Step 4 OCR recognition via TrOCR
+  const handleRecognizeHandwriting = async () => {
+    // Guard against duplicate execution or running with no uploaded sample
+    if (samples.length === 0 || isOcrLoading) return;
+
+    setIsOcrLoading(true);
+    setOcrError(null);
+
+    try {
+      // Use the first uploaded sample image
+      const fileToOcr = samples[0].file;
+      const response = await recognizeHandwriting(fileToOcr);
+
+      // Successfully reached backend
+      setBackendConnected(true);
+
+      if (response && response.success) {
+        setOcrData(response);
+        setOcrError(null);
+      } else {
+        setOcrError(response?.message || 'No handwriting lines could be recognized.');
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'An error occurred while recognizing handwriting.';
+      setOcrError(errorMsg);
+
+      // Only mark disconnected if it's a true unreachable network failure
+      if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
+        setBackendConnected(false);
+      } else {
+        // If the error was a 4xx, 5xx, or client timeout, the server itself is running
+        setBackendConnected(true);
+      }
+    } finally {
+      setIsOcrLoading(false);
+    }
   };
 
   // Trigger Step 2 computer-vision preprocessing pipeline via FastAPI
   const handleProcessSamples = async () => {
-    if (samples.length === 0) return;
+    if (samples.length === 0 || isProcessing) return;
 
     setIsProcessing(true);
     setProcessingError(null);
@@ -106,6 +178,8 @@ export default function Dashboard() {
     try {
       const filesToUpload = samples.map((s) => s.file);
       const response = await processHandwritingSamples(filesToUpload);
+
+      setBackendConnected(true);
 
       if (response.success && response.samples) {
         // Pair processed items with corresponding local original preview URLs
@@ -122,6 +196,9 @@ export default function Dashboard() {
       }
     } catch (err) {
       setProcessingError(err.message || 'Failed to process handwriting samples.');
+      if (err.message?.includes('Backend server is unavailable')) {
+        setBackendConnected(false);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -130,15 +207,21 @@ export default function Dashboard() {
   // Calculate current workflow step for the step indicator
   const hasProcessed = processedSamples.length > 0;
   const hasSegmented = !!segmentationResult && segmentationResult.success;
+  const hasOcr = !!ocrData && ocrData.success;
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
   else if (samples.length > 0 && hasProcessed && !hasSegmented) currentStep = 3;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && !notesText.trim()) currentStep = 4;
-  else if (samples.length > 0 && hasProcessed && hasSegmented && notesText.trim()) currentStep = 5;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && !hasOcr) currentStep = 4;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !notesText.trim()) currentStep = 5;
+  else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && notesText.trim()) currentStep = 6;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
-      <Header backendConnected={backendConnected} />
+      <Header
+        backendConnected={backendConnected}
+        isBusy={isOcrLoading}
+        busyMessage="Backend Busy — Processing OCR"
+      />
 
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-8 py-8 flex-1 flex flex-col gap-8">
         {/* Hero Section */}
@@ -173,19 +256,31 @@ export default function Dashboard() {
           onSegmentationComplete={setSegmentationResult}
         />
 
-        {/* Section 4: Content Editor */}
+        {/* Section 4: Handwritten Text Recognition (OCR) */}
+        <OCRResults
+          ocrData={ocrData}
+          isLoading={isOcrLoading}
+          error={ocrError}
+          onRecognize={handleRecognizeHandwriting}
+          canRecognize={samples.length > 0}
+          activeSampleFilename={samples[0]?.name || ''}
+          lineCount={segmentationResult?.line_count || 0}
+          onUseText={(text) => setNotesText(text)}
+        />
+
+        {/* Section 5: Content Editor */}
         <ContentEditor
           text={notesText}
           onChangeText={setNotesText}
         />
 
-        {/* Section 5: Generation Action Card */}
+        {/* Section 6: Generation Action Card */}
         <GenerationCard
           hasSamples={samples.length > 0}
           hasContent={notesText.trim().length > 0}
         />
 
-        {/* Section 6: Output Preview */}
+        {/* Section 7: Output Preview */}
         <OutputPreview generatedPages={[]} />
       </main>
 

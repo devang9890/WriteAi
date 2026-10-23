@@ -2,11 +2,11 @@ import React from 'react';
 
 const STEPS = [
   { id: 1, label: 'Upload', desc: 'Handwriting Samples' },
-  { id: 2, label: 'Preprocess', desc: 'CV Cleaning' },
+  { id: 2, label: 'Preprocess', desc: 'CV Normalization' },
   { id: 3, label: 'Segment', desc: 'Line Detection' },
-  { id: 4, label: 'Write', desc: 'Notes / Content' },
-  { id: 5, label: 'Generate', desc: 'AI Engine' },
-  { id: 6, label: 'Export', desc: 'PNG / PDF' },
+  { id: 4, label: 'OCR', desc: 'TrOCR Recognition' },
+  { id: 5, label: 'Write', desc: 'Notes / Content' },
+  { id: 6, label: 'Generate', desc: 'Handwriting Engine' },
 ];
 
 export default function StepIndicator({ currentStep = 1 }) {

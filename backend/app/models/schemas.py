@@ -55,3 +55,26 @@ class SegmentResponse(BaseModel):
     annotated_image: Optional[str] = None
     message: Optional[str] = None
     diagnostics: Optional[Dict[str, Any]] = None
+
+
+class OCRLineItem(BaseModel):
+    index: int
+    bbox: Optional[BoundingBox] = None
+    image: Optional[str] = None
+    text: str
+
+
+class OCRResponse(BaseModel):
+    success: bool
+    filename: str
+    line_count: int
+    model: str
+    device: str
+    preprocessing_mode: Optional[str] = "original"
+    lines: List[OCRLineItem] = []
+    full_text: str
+    original_size: Optional[OriginalSize] = None
+    annotated_image: Optional[str] = None
+    message: Optional[str] = None
+    inference_time_sec: Optional[float] = None
+
