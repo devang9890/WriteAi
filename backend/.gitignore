@@ -14,3 +14,7 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+data/generated_pages/*
+!data/generated_pages/.gitkeep
+data/profiles/*
+!data/profiles/.gitkeep

@@ -225,3 +225,61 @@ class PersonalizedProfileResponse(BaseModel):
         "or a handwriting generation model."
     )
     message: Optional[str] = None
+
+
+# ==========================================
+# Step 8 Handwriting Generation Engine Models
+# ==========================================
+
+class GenerateHandwritingOptions(BaseModel):
+    font_family: str = Field("cursive", description="Font style: 'cursive' (Segoe Script / connected cursive), 'casual' (Ink Free), 'fluid' (Freestyle Script), 'print' (Segoe Print)")
+    font_size: int = Field(34, ge=14, le=48, description="Base handwriting font size in pixels (14 to 48)")
+    ink_color: Optional[str] = Field(None, description="Hex color override (e.g. '#1c345e'). If None, adopts profile dominant ink color or authentic ballpoint blue.")
+    page_style: str = Field("ruled", description="Paper background: 'ruled' (notebook lines), 'plain' (clean white paper), 'blank' (ivory parchment), 'grid' (engineering grid)")
+    line_spacing_mult: float = Field(1.5, ge=1.0, le=2.8, description="Line height multiplier (1.0 to 2.8)")
+    margin_x: int = Field(80, ge=40, le=200, description="Left/right margins in pixels")
+    margin_top: int = Field(100, ge=40, le=250, description="Top margin in pixels")
+    margin_bottom: int = Field(100, ge=40, le=250, description="Bottom margin in pixels")
+    profile_id: str = Field("default_writer", description="Target profile ID to retrieve style metrics from")
+    use_profile: bool = Field(True, description="Whether to apply personalized profile parameters (color, line spacing, stroke, slant) if available")
+    simulate_pressure: bool = Field(True, description="Apply natural subtle human pressure and baseline micro-wobbles to avoid rigid mechanical appearance")
+
+
+class GenerateHandwritingRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=30000, description="User text/notes to convert into handwritten pages")
+    options: Optional[GenerateHandwritingOptions] = None
+
+
+class GeneratedPageItem(BaseModel):
+    page_number: int
+    total_pages: int
+    width: int
+    height: int
+    image_data: str  # Base64 data URL: data:image/png;base64,...
+    file_url: Optional[str] = None  # Direct GET endpoint path
+    word_count: int
+    char_count: int
+    line_count: int
+
+
+class GenerateHandwritingResponse(BaseModel):
+    success: bool
+    session_id: str
+    total_pages: int
+    pages: List[GeneratedPageItem]
+    profile_applied: bool
+    profile_id: Optional[str] = None
+    renderer_name: str = "Experimental profile-based rendering (Parametric Engine v2.0)"
+    renderer_notice: str = (
+        "Experimental profile-based rendering: This page is rendered using an algorithmic parametric pipeline "
+        "informed by your Step 7 handwriting profile (dominant ballpoint ink color, multi-pass stroke dilation, "
+        "median line spacing, and typographic baseline anchoring). Note: ResNet-18 extracted visual features, "
+        "not a trained generative handwriting synthesis network. A dedicated deep learning generative model "
+        "(e.g. sequence-aware stroke synthesizer) is required to learn and replicate idiosyncratic character glyph topologies."
+    )
+    generation_time_sec: float
+    options_applied: Dict[str, Any] = {}
+    pdf_url: Optional[str] = None
+    message: Optional[str] = None
+
+

@@ -418,3 +418,60 @@ export async function deleteStyleProfile(profileId = 'default_writer') {
     throw new Error(formatApiError(err, 'Could not delete style profile.'));
   }
 }
+
+/**
+ * Step 8: Generates realistic handwritten-style A4 page images from user-supplied text.
+ * Integrates morphological parameters from the Step 7 style profile (ink color, line spacing, stroke).
+ *
+ * @param {string} text - The input notes/content to render
+ * @param {Object} [options] - Custom rendering parameters
+ * @param {string} [options.fontFamily='casual'] - 'casual', 'print', 'cursive'
+ * @param {number} [options.fontSize=26] - Font size in pixels
+ * @param {string} [options.pageStyle='ruled'] - 'ruled', 'blank', 'grid'
+ * @param {string} [options.inkColor] - Optional hex color override
+ * @param {string} [options.profileId='default_writer'] - Style profile ID
+ * @param {boolean} [options.useProfile=true] - Whether to apply Step 7 profile parameters
+ * @param {AbortSignal} [options.signal]
+ * @returns {Promise<{
+ *   success: boolean,
+ *   session_id: string,
+ *   total_pages: number,
+ *   pages: Array<{ page_number: number, total_pages: number, width: number, height: number, image_data: string, file_url: string, word_count: number, line_count: number }>,
+ *   profile_applied: boolean,
+ *   profile_id?: string,
+ *   renderer_name: string,
+ *   renderer_notice: string,
+ *   generation_time_sec: number,
+ *   options_applied: Object
+ * }>}
+ */
+export async function generateHandwrittenNotes(text, options = {}) {
+  if (!text || !text.trim()) {
+    throw new Error('Please enter some notes or text before generating handwritten pages.');
+  }
+
+  const payload = {
+    text: text.trim(),
+    options: {
+      font_family: options.fontFamily || 'casual',
+      font_size: options.fontSize || 26,
+      page_style: options.pageStyle || 'ruled',
+      ink_color: options.inkColor || null,
+      line_spacing_mult: options.lineSpacingMult || 1.4,
+      profile_id: options.profileId || 'default_writer',
+      use_profile: options.useProfile !== undefined ? options.useProfile : true,
+      simulate_pressure: true,
+    },
+  };
+
+  try {
+    const response = await apiClient.post('/api/generate/handwriting', payload, {
+      timeout: 60000,
+      signal: options.signal,
+    });
+    return response.data;
+  } catch (err) {
+    throw new Error(formatApiError(err, 'An unexpected error occurred while generating handwritten pages.'));
+  }
+}
+

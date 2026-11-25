@@ -21,6 +21,7 @@ import {
   createStyleProfile,
   getSavedStyleProfile,
   deleteStyleProfile,
+  generateHandwrittenNotes,
 } from '../services/api';
 
 export default function Dashboard() {
@@ -42,13 +43,17 @@ export default function Dashboard() {
   const [profileData, setProfileData] = useState(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
+  const [generationData, setGenerationData] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState(null);
   const [notesText, setNotesText] = useState('');
 
   // Keep a ref to busy state so health check interval doesn't falsely mark disconnected
   const isBusyRef = useRef(false);
   useEffect(() => {
-    isBusyRef.current = isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading;
-  }, [isOcrLoading, isStyleLoading, isEncoderLoading, isProfileLoading]);
+    isBusyRef.current =
+      isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading || isGenerating;
+  }, [isOcrLoading, isStyleLoading, isEncoderLoading, isProfileLoading, isGenerating]);
 
   // Periodic health check for backend connection status
   // Decoupled from heavy CV/OCR/CNN workloads: during active processing, backend is actively working
@@ -172,6 +177,8 @@ export default function Dashboard() {
     setEncoderData(null);
     setEncoderError(null);
     setProcessingError(null);
+    setGenerationData(null);
+    setGenerationError(null);
   };
 
   // Trigger Step 4 OCR recognition via TrOCR
@@ -342,6 +349,42 @@ export default function Dashboard() {
     }
   };
 
+  // Trigger Step 8: Real Handwriting Generation Engine
+  const handleGenerateHandwriting = async (options) => {
+    if (!notesText.trim() || isGenerating) return;
+
+    setIsGenerating(true);
+    setGenerationError(null);
+
+    try {
+      const response = await generateHandwrittenNotes(notesText, {
+        ...options,
+        profileId: profileData?.profile_id || 'default_writer',
+        useProfile: options.useProfile && !!profileData && profileData.status === 'ready',
+      });
+
+      setBackendConnected(true);
+
+      if (response && response.success) {
+        setGenerationData(response);
+        setGenerationError(null);
+      } else {
+        setGenerationError(response?.message || 'Failed to render handwritten pages.');
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'An error occurred while generating handwritten pages.';
+      setGenerationError(errorMsg);
+
+      if (errorMsg.includes('Backend server is unavailable') || errorMsg.includes('ERR_NETWORK')) {
+        setBackendConnected(false);
+      } else {
+        setBackendConnected(true);
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   // Trigger Step 2 computer-vision preprocessing pipeline via FastAPI
   const handleProcessSamples = async () => {
     if (samples.length === 0 || isProcessing) return;
@@ -384,6 +427,7 @@ export default function Dashboard() {
   const hasStyle = !!styleData && styleData.success;
   const hasEncoder = !!encoderData && encoderData.success;
   const hasProfile = !!profileData && profileData.status === 'ready';
+  const hasGenerated = !!generationData && generationData.success && generationData.pages?.length > 0;
 
   let currentStep = 1;
   if (samples.length > 0 && !hasProcessed) currentStep = 2;
@@ -392,13 +436,14 @@ export default function Dashboard() {
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && !hasStyle) currentStep = 5;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && !hasEncoder) currentStep = 6;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && !hasProfile) currentStep = 7;
+  else if (hasGenerated) currentStep = 8;
   else if (samples.length > 0 && hasProcessed && hasSegmented && hasOcr && hasStyle && hasEncoder && hasProfile) currentStep = 8;
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
       <Header
         backendConnected={backendConnected}
-        isBusy={isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading}
+        isBusy={isOcrLoading || isStyleLoading || isEncoderLoading || isProfileLoading || isGenerating}
         busyMessage={
           isOcrLoading
             ? 'Backend Busy — Processing OCR'
@@ -408,6 +453,8 @@ export default function Dashboard() {
             ? 'Backend Busy — CNN Feature Extraction'
             : isProfileLoading
             ? 'Backend Busy — Building Style Profile'
+            : isGenerating
+            ? 'Backend Busy — Rendering Handwriting'
             : ''
         }
       />
@@ -498,12 +545,20 @@ export default function Dashboard() {
 
         {/* Section 8: Generation Action Card */}
         <GenerationCard
-          hasSamples={samples.length > 0}
           hasContent={notesText.trim().length > 0}
+          hasProfile={!!profileData && profileData.status === 'ready'}
+          profileData={profileData}
+          onGenerate={handleGenerateHandwriting}
+          isLoading={isGenerating}
+          error={generationError}
         />
 
         {/* Section 9: Output Preview */}
-        <OutputPreview generatedPages={[]} />
+        <OutputPreview
+          generationData={generationData}
+          generatedPages={generationData?.pages || []}
+          isLoading={isGenerating}
+        />
       </main>
 
       <footer className="border-t border-slate-200/80 bg-white/50 py-6 px-4 text-center text-xs text-slate-400">

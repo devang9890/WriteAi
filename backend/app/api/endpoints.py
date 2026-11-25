@@ -17,6 +17,8 @@ from app.models.schemas import (
     StyleProfileResponse,
     StyleEncoderResponse,
     PersonalizedProfileResponse,
+    GenerateHandwritingRequest,
+    GenerateHandwritingResponse,
 )
 from app.services.ai_service import ai_service
 from app.services.preprocessing import preprocess_image, validate_image_file, ImageValidationError
@@ -495,4 +497,82 @@ async def delete_profile(profile_id: str = "default_writer"):
             detail=f"No profile found with id '{profile_id}' to delete."
         )
     return {"success": True, "message": f"Profile '{profile_id}' was deleted successfully."}
+
+
+@router.post("/generate/handwriting", response_model=GenerateHandwritingResponse)
+@router.post("/samples/generate-handwriting", response_model=GenerateHandwritingResponse)
+async def generate_handwritten_pages(payload: GenerateHandwritingRequest):
+    """
+    Step 8 Real Backend Handwriting Generation Engine:
+    Renders user-supplied text into realistic handwritten-style A4 page images using Pillow.
+    Integrates morphological parameters from the Step 7 personalized handwriting profile:
+    dominant ink color, stroke width, and median line geometry.
+    """
+    from fastapi.concurrency import run_in_threadpool
+    from app.services.generation_service import get_generation_service
+
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Input text cannot be empty. Please provide text content to generate."
+        )
+
+    gen_service = get_generation_service()
+    try:
+        response = await run_in_threadpool(
+            gen_service.generate_handwriting,
+            text=payload.text,
+            options=payload.options,
+        )
+        return response
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as ex:
+        print(f"[GenerationService] Error during handwriting generation: {ex}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while generating handwritten pages: {str(ex)}"
+        )
+
+
+@router.get("/generate/page/{session_id}/{page_num}")
+async def get_generated_page(session_id: str, page_num: int):
+    """
+    Retrieves the raw PNG image of a generated page for direct viewing or downloading.
+    """
+    from fastapi import Response
+    from app.services.generation_service import get_generation_service
+
+    gen_service = get_generation_service()
+    img_bytes = gen_service.get_generated_page_bytes(session_id=session_id, page_num=page_num)
+    if not img_bytes:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Generated page {page_num} for session '{session_id}' not found."
+        )
+    return Response(content=img_bytes, media_type="image/png")
+
+
+@router.get("/generate/pdf/{session_id}")
+async def get_generated_pdf(session_id: str):
+    """
+    Retrieves the compiled multi-page PDF document of the generated handwriting.
+    """
+    from fastapi import Response
+    from app.services.generation_service import get_generation_service
+
+    gen_service = get_generation_service()
+    pdf_bytes = gen_service.get_generated_pdf_bytes(session_id=session_id)
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Generated PDF document for session '{session_id}' not found."
+        )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="WriteAI_Handwritten_{session_id}.pdf"'},
+    )
+
+
 
